@@ -70,7 +70,7 @@ func main() {
     var wg sync.WaitGroup
 
 
-    // walkDir recursively processes the given directory.
+    // walkDir recursively processes the given directory and sub-directories concurrently
     var walkDir func(dir string, search string, sizeFlag bool) 
 
     walkDir = func (dir string, search string, sizeFlag bool) {
@@ -88,9 +88,15 @@ func main() {
         for _, entry := range entries {
             fullPath := filepath.Join(dir, entry.Name())
             if entry.IsDir() {
+
+                // Exclude directories starting with ".cache"
+                if strings.HasPrefix(entry.Name(), ".cache") {
+                    continue
+                }                
+                
                 // Recursively process subdirectories
-                        // Spawn a new goroutine for subdirectories.
-                        wg.Add(1)
+                // Spawn a new goroutine for subdirectories.
+                wg.Add(1)
                 go walkDir(fullPath, search, sizeFlag)
             } else {
                 // Check if the file name contains the search string.
@@ -99,7 +105,8 @@ func main() {
                 if strings.Contains(strings.ToLower(entry.Name()), search) {
 
                     if sizeFlag {
-                    
+                    	
+                        // Check if the entry is a symlink.
                         if entry.Type()&os.ModeSymlink != 0 {
                             // For symlinks, avoid calling os.Stat and simply note it's a symlink.
                             fileCh <- fmt.Sprintf("%s\tsymlink", fullPath)
