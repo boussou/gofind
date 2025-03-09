@@ -73,10 +73,13 @@ func main() {
 	// Create a semaphore channel to limit concurrent walkDir invocations.
 	sem := make(chan struct{}, maxConcurrent)
 
+	//Captured Variables:
+	//The variables lowerSearch, *sizeFlag, *printDirFlag, and the semaphore sem are captured by the walkDir closure.
+
 	// walkDir recursively processes the given directory and its subdirectories concurrently.
 	// It uses the semaphore (sem) to limit concurrent calls.
-	var walkDir func(dir string, search string, sizeFlag bool, printDir bool, sem chan struct{})
-	walkDir = func(dir string, search string, sizeFlag bool, printDir bool, sem chan struct{}) {
+	var walkDir func(dir string)
+	walkDir = func(dir string) {
 		// Acquire a slot in the semaphore.
 		sem <- struct{}{}
 		// Release the slot when done.
@@ -95,12 +98,12 @@ func main() {
 			fullPath := filepath.Join(dir, entry.Name())
 			if entry.IsDir() {
 				// Optionally print the directory name if -printDir is set and its name matches the search.
-				if printDir {
+				if *printDirFlag {
 					lowerDirName := strings.ToLower(entry.Name())
 		                	// When search is empty, strings.Contains always returns true.					
-					if strings.Contains(lowerDirName, search) {
+					if strings.Contains(lowerDirName, lowerSearch) {
 						// Mark the output as a directory.
-						if sizeFlag {
+						if *sizeFlag {
 							fileCh <- fmt.Sprintf("%s\tDIR", fullPath)
 						} else {
 							fileCh <- fullPath
@@ -110,14 +113,14 @@ func main() {
 
 				// Spawn a new goroutine for subdirectories.
 				wg.Add(1)
-				go walkDir(fullPath, search, sizeFlag,  printDir, sem)
+				go walkDir(fullPath)
 			} else {
 				// Convert the file name to lower-case before comparing.
 				lowerName := strings.ToLower(entry.Name())
 		                // Check if the file name contains the search string.
 		                // When search is empty, strings.Contains always returns true.
-				if strings.Contains(lowerName, search) {
-					if sizeFlag {
+				if strings.Contains(lowerName, lowerSearch) {
+					if *sizeFlag {
 						// Check if the entry is a symlink: avoid calling os.Stat on symlinks.
 						if entry.Type()&os.ModeSymlink != 0 {
 							fileCh <- fmt.Sprintf("%s\tSYMLINK", fullPath)
@@ -144,7 +147,7 @@ func main() {
 
 	// Start traversing from the root directory.
 	wg.Add(1)
-	go walkDir(root, lowerSearch, *sizeFlag, *printDirFlag, sem)
+	go walkDir(root)
 
 	// Close the channel once all goroutines have finished.
     // (so after all directories have been processed)
