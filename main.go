@@ -71,13 +71,10 @@ func main() {
 	// Create a semaphore channel to limit concurrent walkDir invocations.
 	sem := make(chan struct{}, maxConcurrent)
 
-	// A mutex (not strictly needed here, but included to mimic gocount.go).
-	var mu sync.Mutex
-
 	// walkDir recursively processes the given directory and its subdirectories concurrently.
 	// It uses the semaphore (sem) to limit concurrent calls.
-	var walkDir func(dir string, search string, sizeFlag bool, sem chan struct{}, mu *sync.Mutex)
-	walkDir = func(dir string, search string, sizeFlag bool, sem chan struct{}, mu *sync.Mutex) {
+	var walkDir func(dir string, search string, sizeFlag bool, sem chan struct{})
+	walkDir = func(dir string, search string, sizeFlag bool, sem chan struct{}) {
 		// Acquire a slot in the semaphore.
 		sem <- struct{}{}
 		// Release the slot when done.
@@ -98,7 +95,7 @@ func main() {
                 // Recursively process subdirectories
 				// Spawn a new goroutine for subdirectories.
 				wg.Add(1)
-				go walkDir(fullPath, search, sizeFlag, sem, mu)
+				go walkDir(fullPath, search, sizeFlag, sem)
 			} else {
 				// Convert the file name to lower-case before comparing.
 				lowerName := strings.ToLower(entry.Name())
@@ -132,7 +129,7 @@ func main() {
 
 	// Start traversing from the root directory.
 	wg.Add(1)
-	go walkDir(root, lowerSearch, *sizeFlag, sem, &mu)
+	go walkDir(root, lowerSearch, *sizeFlag, sem)
 
 	// Close the channel once all goroutines have finished.
     // (so after all directories have been processed)
