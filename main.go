@@ -54,11 +54,9 @@ func main() {
 			root = filepath.Join(home, root[2:])
 		}
 	}
-
 	// Convert search and exclude strings to lower-case for case-insensitive matching.
 	lowerSearch := strings.ToLower(*search)
-	excludeFile := strings.ToLower(*excludeFile)
-
+	
 	// Display the search parameter only if it is not empty.
 	if lowerSearch != "" {
 		fmt.Printf("Search parameter: %s\n", lowerSearch)
@@ -66,6 +64,27 @@ func main() {
 	if excludeFile != "" {
 		fmt.Printf("Exclude parameter: %s\n", excludeFile)
 	}
+
+    //...............//...............//...............
+
+    // Load excluded directory names from the exclude file (if provided).
+    excludedDirs := make(map[string]bool)
+    if excludeFile != "" {
+        data, err := os.ReadFile(excludeFile)
+        if err != nil {
+            log.Fatalf("failed to read exclude file %s: %v", excludeFile, err)
+        }
+        lines := strings.Split(string(data), "\n")
+        for _, line := range lines {
+            dirName := strings.TrimSpace(line)
+            if dirName != "" {
+                excludedDirs[dirName] = true
+            }
+        }
+    }
+    //...............//...............//...............
+
+
 
 	// Channel to send matching file info.
 	fileCh := make(chan string)
@@ -92,6 +111,11 @@ func main() {
 		                //if strings.HasPrefix(entry.Name(), ".cache") {
 		                //    continue
 		                //}  
+
+                // Check if the directory should be excluded.
+                if excludedDirs[entry.Name()] {
+                    continue
+                }
 
 				// Spawn a new goroutine for subdirectories.
 				wg.Add(1)
@@ -147,8 +171,7 @@ func main() {
 		close(fileCh)
 	}()
 
-	// Print out the results.
-    // Print the matching files.    
+    // Print the results: matching files
 	for fileInfo := range fileCh {
 		fmt.Println(fileInfo)
 	}
