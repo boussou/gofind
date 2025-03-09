@@ -10,14 +10,15 @@ import (
 	"sync"
 )
 
-const maxConcurrent = 100
+const maxConcurrent = 1000
 
 // gofind searches for files whose names contain a search string (case-insensitive).
-// Optionally, it displays file sizes when -size is set.
+// Optionally, it displays file sizes when -size is set, and prints directory names if -printdir is set.
+// printing directory names allows to totally mimic the linux find command output.
 // Sample calls:
 //   gofind -search contains -size /tmp/sandbox
-//   gofind /tmp/sandbox -search contains
-//   gofind /tmp/sandbox -search contains -size
+//   gofind /tmp/sandbox -search contains  -printdir
+//   gofind /tmp/sandbox -search contains -size  -printdir
 func main() {
 	// Default root directory.
 	root := "."
@@ -33,9 +34,10 @@ func main() {
 		os.Args = newArgs
 	}
 
-	// Define flags for search string and size.
+	// Define flags for search string, size display, and printing directory names.
 	search := flag.String("search", "", "Search string to match in file names (case-insensitive)")
 	sizeFlag := flag.Bool("size", false, "Display file size if set")
+	printDirFlag := flag.Bool("printdir", false, "Also print directory names that match the search string")
 	flag.Parse()
 
 	// If a positional argument remains after flag.Parse(), use it as the root.
@@ -64,7 +66,7 @@ func main() {
 		fmt.Printf("Search parameter: %s\n", lowerSearch)
 	}
 
-	// Create a channel to send matching file info.
+	// Channel to send matching file (or directory) info.
 	fileCh := make(chan string)
 	var wg sync.WaitGroup
 
@@ -73,8 +75,8 @@ func main() {
 
 	// walkDir recursively processes the given directory and its subdirectories concurrently.
 	// It uses the semaphore (sem) to limit concurrent calls.
-	var walkDir func(dir string, search string, sizeFlag bool, sem chan struct{})
-	walkDir = func(dir string, search string, sizeFlag bool, sem chan struct{}) {
+	var walkDir func(dir string, search string, sizeFlag bool, printDir bool, sem chan struct{})
+	walkDir = func(dir string, search string, sizeFlag bool, printDir bool, sem chan struct{}) {
 		// Acquire a slot in the semaphore.
 		sem <- struct{}{}
 		// Release the slot when done.
@@ -92,10 +94,23 @@ func main() {
 		for _, entry := range entries {
 			fullPath := filepath.Join(dir, entry.Name())
 			if entry.IsDir() {
-                // Recursively process subdirectories
+				// Optionally print the directory name if -printDir is set and its name matches the search.
+				if printDir {
+					lowerDirName := strings.ToLower(entry.Name())
+		                	// When search is empty, strings.Contains always returns true.					
+					if strings.Contains(lowerDirName, search) {
+						// Mark the output as a directory.
+						if sizeFlag {
+							fileCh <- fmt.Sprintf("%s\tDIR", fullPath)
+						} else {
+							fileCh <- fullPath
+						}
+					}
+				}
+
 				// Spawn a new goroutine for subdirectories.
 				wg.Add(1)
-				go walkDir(fullPath, search, sizeFlag, sem)
+				go walkDir(fullPath, search, sizeFlag,  printDir, sem)
 			} else {
 				// Convert the file name to lower-case before comparing.
 				lowerName := strings.ToLower(entry.Name())
@@ -105,7 +120,7 @@ func main() {
 					if sizeFlag {
 						// Check if the entry is a symlink: avoid calling os.Stat on symlinks.
 						if entry.Type()&os.ModeSymlink != 0 {
-							fileCh <- fmt.Sprintf("%s\tsymlink", fullPath)
+							fileCh <- fmt.Sprintf("%s\tSYMLINK", fullPath)
 						} else {
 							// For regular files, call os.Stat to get the file size.
 
@@ -129,7 +144,7 @@ func main() {
 
 	// Start traversing from the root directory.
 	wg.Add(1)
-	go walkDir(root, lowerSearch, *sizeFlag, sem)
+	go walkDir(root, lowerSearch, *sizeFlag, *printDirFlag, sem)
 
 	// Close the channel once all goroutines have finished.
     // (so after all directories have been processed)

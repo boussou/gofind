@@ -16,9 +16,10 @@ gofind /tmp/sandbox -search contains -size
 ```
 
 parameters:
- - search Search string to match in file names (case-insensitive)
+- search Search string to match in file names (case-insensitive)
 - size  displays the file size right after the filename
-
+- printdir:  Optionally prints directory names if -printdir is set
+             It allow to totally mimic the output of the linux find command.
 
 
 ## Execute
