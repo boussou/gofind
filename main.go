@@ -32,7 +32,7 @@ func main() {
 	}
 
 	// Define flags for search string and size.
-	search := flag.String("search", "", "Search string to match in file names")
+	search := flag.String("search", "", "Search string to match in file names (case-insensitive)")
 	sizeFlag := flag.Bool("size", false, "Display file size if set")
 	flag.Parse()
 
@@ -88,25 +88,23 @@ func main() {
         for _, entry := range entries {
             fullPath := filepath.Join(dir, entry.Name())
             if entry.IsDir() {
-
-                // Exclude directories starting with ".cache"
-                if strings.HasPrefix(entry.Name(), ".cache") {
-                    continue
-                }                
-                
+                             
                 // Recursively process subdirectories
                 // Spawn a new goroutine for subdirectories.
                 wg.Add(1)
                 go walkDir(fullPath, search, sizeFlag)
+
             } else {
+		// Convert the file name to lower-case before comparing.
+		lowerName := strings.ToLower(entry.Name())
+					    
                 // Check if the file name contains the search string.
                 // When search is empty, strings.Contains always returns true.
-                // Convert file name to lower-case before comparing.			
-                if strings.Contains(strings.ToLower(entry.Name()), search) {
+                if strings.Contains(lowerName, search) {
 
                     if sizeFlag {
                     	
-                        // Check if the entry is a symlink.
+			// Check if the entry is a symlink: avoid calling os.Stat on symlinks
                         if entry.Type()&os.ModeSymlink != 0 {
                             // For symlinks, avoid calling os.Stat and simply note it's a symlink.
                             fileCh <- fmt.Sprintf("%s\tsymlink", fullPath)
@@ -133,19 +131,18 @@ func main() {
         }
     }
 	
-    // Start traversing from the root directory.
+	// Start traversing from the root directory the directory tree    
     wg.Add(1)
-    // Walk through the directory tree.
     go walkDir(root, lowerSearch, *sizeFlag)
 
-    // Close the channel once all goroutines have finished.
-    // Close the channel after all directories are processed.    
+	// Close the channel once all goroutines have finished
+    // (so after all directories have been processed)
     go func() {
         wg.Wait()
         close(fileCh)
     }()
 
-    // Print out the results.
+    // Print the results: matching files
     for fileInfo := range fileCh {
         fmt.Println(fileInfo)
     }
