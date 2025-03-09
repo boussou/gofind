@@ -52,16 +52,19 @@ func main() {
 		}
 	}
 
+	// Convert search string to lower-case for case-insensitive matching.
+	lowerSearch := strings.ToLower(*search)
+
 	// Display the search parameter only if it is not empty.
-	if *search != "" {
-		fmt.Printf("Search parameter: %s\n", *search)
+	if lowerSearch != "" {
+		fmt.Printf("Search parameter: %s\n", lowerSearch)
 	}
 
     // Collect results in a slice
     var results []string
 
 	// Walk through the directory tree.
-	walkDir(root, *search, &results)
+	walkDir(root, lowerSearch, &results)
 
 	// Print out the results.
 	for _, fileInfo := range results {
@@ -87,7 +90,8 @@ func walkDir(dir string, search string, results *[]string) {
 		} else {
             		// Check if the file name contains the search string.
 	    		// When search is empty, strings.Contains always returns true.
-			if strings.Contains(entry.Name(), search) {
+			// Convert file name to lower-case before comparing.			
+			if strings.Contains(strings.ToLower(entry.Name()), search) {
 
                 // Append formatted output to results slice
                 *results = append(*results, fmt.Sprintf("%s", fullPath))
