@@ -70,7 +70,7 @@ func main() {
     var wg sync.WaitGroup
 
 
-// walkDir recursively processes the given directory.
+    // walkDir recursively processes the given directory.
     var walkDir func(dir string, search string, sizeFlag bool) 
 
     walkDir = func (dir string, search string, sizeFlag bool) {
@@ -100,15 +100,23 @@ func main() {
 
                     if sizeFlag {
                     
-                        // Get file details (e.g., size) using os.Stat (Slow !)
-                        info, err := os.Stat(fullPath)
-                        if err != nil {
-                            log.Printf("failed to stat file %s: %v\n", fullPath, err)
-                            continue
+                        if entry.Type()&os.ModeSymlink != 0 {
+                            // For symlinks, avoid calling os.Stat and simply note it's a symlink.
+                            fileCh <- fmt.Sprintf("%s\tsymlink", fullPath)
+                        } else {
+                            // For non-symlink files, call os.Stat to get the file size.
+
+                            // Get file details (e.g., size) using os.Stat (Slow !)
+                            info, err := os.Stat(fullPath)
+                            if err != nil {
+                                log.Printf("failed to stat file %s: %v\n", fullPath, err)
+                                continue
+                            }
+
+                            // Send the formatted output to the channel.
+                            fileCh <-  fmt.Sprintf("%s\t%d", fullPath, info.Size())
                         }
 
-                        // Append formatted output to results slice
-                        fileCh <-  fmt.Sprintf("%s\t%d", fullPath, info.Size())
                     } else {
                         fileCh <-  fullPath
                     }
@@ -124,6 +132,7 @@ func main() {
     go walkDir(root, lowerSearch, *sizeFlag)
 
     // Close the channel once all goroutines have finished.
+    // Close the channel after all directories are processed.    
     go func() {
         wg.Wait()
         close(fileCh)
