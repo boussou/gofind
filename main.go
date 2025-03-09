@@ -7,15 +7,17 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-    "sync"
+	"sync"
 )
 
-// search file which name contains a string (case-insensitive)
-// sample calls:
+const maxConcurrent = 100
+
+// gofind searches for files whose names contain a search string (case-insensitive).
+// Optionally, it displays file sizes when -size is set.
+// Sample calls:
 //   gofind -search contains -size /tmp/sandbox
 //   gofind /tmp/sandbox -search contains
 //   gofind /tmp/sandbox -search contains -size
-
 func main() {
 	// Default root directory.
 	root := "."
@@ -42,7 +44,6 @@ func main() {
 	}
 
 	// Tilde Expansion: Expand "~" to the user's home directory.
-	// Expand tilde if present (e.g., "~/D" -> "/home/username/D")	
 	if strings.HasPrefix(root, "~") {
 		home, err := os.UserHomeDir() // get the current user's home directory
 		if err != nil {
@@ -63,89 +64,85 @@ func main() {
 		fmt.Printf("Search parameter: %s\n", lowerSearch)
 	}
 
+	// Create a channel to send matching file info.
+	fileCh := make(chan string)
+	var wg sync.WaitGroup
 
-    // Channel to send matching file info.
-    fileCh := make(chan string)
-    
-    var wg sync.WaitGroup
+	// Create a semaphore channel to limit concurrent walkDir invocations.
+	sem := make(chan struct{}, maxConcurrent)
 
+	// A mutex (not strictly needed here, but included to mimic gocount.go).
+	var mu sync.Mutex
 
-    // walkDir recursively processes the given directory and sub-directories concurrently
-    var walkDir func(dir string, search string, sizeFlag bool) 
+	// walkDir recursively processes the given directory and its subdirectories concurrently.
+	// It uses the semaphore (sem) to limit concurrent calls.
+	var walkDir func(dir string, search string, sizeFlag bool, sem chan struct{}, mu *sync.Mutex)
+	walkDir = func(dir string, search string, sizeFlag bool, sem chan struct{}, mu *sync.Mutex) {
+		// Acquire a slot in the semaphore.
+		sem <- struct{}{}
+		// Release the slot when done.
+		defer func() { <-sem }()
+		defer wg.Done()
 
-    walkDir = func (dir string, search string, sizeFlag bool) {
+		// List the directory entries.
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			log.Printf("failed to read directory %s: %v\n", dir, err)
+			return
+		}
 
-    defer wg.Done()
-
-        // List the directory entries.
-        entries, err := os.ReadDir(dir)
-        if err != nil {
-            log.Printf("failed to read directory %s: %v\n", dir, err)
-            return
-        }
-
-        // Iterate over each entry.
-        for _, entry := range entries {
-            fullPath := filepath.Join(dir, entry.Name())
-            if entry.IsDir() {
-                             
+		// Iterate over each entry.
+		for _, entry := range entries {
+			fullPath := filepath.Join(dir, entry.Name())
+			if entry.IsDir() {
                 // Recursively process subdirectories
-                // Spawn a new goroutine for subdirectories.
-                wg.Add(1)
-                go walkDir(fullPath, search, sizeFlag)
+				// Spawn a new goroutine for subdirectories.
+				wg.Add(1)
+				go walkDir(fullPath, search, sizeFlag, sem, mu)
+			} else {
+				// Convert the file name to lower-case before comparing.
+				lowerName := strings.ToLower(entry.Name())
+		                // Check if the file name contains the search string.
+		                // When search is empty, strings.Contains always returns true.
+				if strings.Contains(lowerName, search) {
+					if sizeFlag {
+						// Check if the entry is a symlink: avoid calling os.Stat on symlinks.
+						if entry.Type()&os.ModeSymlink != 0 {
+							fileCh <- fmt.Sprintf("%s\tsymlink", fullPath)
+						} else {
+							// For regular files, call os.Stat to get the file size.
 
-            } else {
-		// Convert the file name to lower-case before comparing.
-		lowerName := strings.ToLower(entry.Name())
-					    
-                // Check if the file name contains the search string.
-                // When search is empty, strings.Contains always returns true.
-                if strings.Contains(lowerName, search) {
-
-                    if sizeFlag {
-                    	
-			// Check if the entry is a symlink: avoid calling os.Stat on symlinks
-                        if entry.Type()&os.ModeSymlink != 0 {
-                            // For symlinks, avoid calling os.Stat and simply note it's a symlink.
-                            fileCh <- fmt.Sprintf("%s\tsymlink", fullPath)
-                        } else {
-                            // For non-symlink files, call os.Stat to get the file size.
-
-                            // Get file details (e.g., size) using os.Stat (Slow !)
-                            info, err := os.Stat(fullPath)
-                            if err != nil {
-                                log.Printf("failed to stat file %s: %v\n", fullPath, err)
-                                continue
-                            }
+		                            		// Get file details (e.g., size) using os.Stat (Slow !)
+							info, err := os.Stat(fullPath)
+							if err != nil {
+								log.Printf("failed to stat file %s: %v\n", fullPath, err)
+								continue
+							}
 
                             // Send the formatted output to the channel.
-                            fileCh <-  fmt.Sprintf("%s\t%d", fullPath, info.Size())
-                        }
+							fileCh <- fmt.Sprintf("%s\t%d", fullPath, info.Size())
+						}
+					} else {
+						fileCh <- fullPath
+					}
+				}
+			}
+		}
+	}
 
-                    } else {
-                        fileCh <-  fullPath
-                    }
+	// Start traversing from the root directory.
+	wg.Add(1)
+	go walkDir(root, lowerSearch, *sizeFlag, sem, &mu)
 
-                }
-            }
-        }
-    }
-	
-	// Start traversing from the root directory the directory tree    
-    wg.Add(1)
-    go walkDir(root, lowerSearch, *sizeFlag)
-
-	// Close the channel once all goroutines have finished
+	// Close the channel once all goroutines have finished.
     // (so after all directories have been processed)
-    go func() {
-        wg.Wait()
-        close(fileCh)
-    }()
+	go func() {
+		wg.Wait()
+		close(fileCh)
+	}()
 
     // Print the results: matching files
-    for fileInfo := range fileCh {
-        fmt.Println(fileInfo)
-    }
-
-
+	for fileInfo := range fileCh {
+		fmt.Println(fileInfo)
+	}
 }
