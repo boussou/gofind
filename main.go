@@ -9,10 +9,11 @@ import (
 	"strings"
 )
 
-// search file which name contains a string
-// sample call:
-// gofind  -search contains  /tmp/sandbox
-// gofind   /tmp/sandbox -search contains
+// search file which name contains a string (case-insensitive)
+// sample calls:
+//   gofind -search contains -size /tmp/sandbox
+//   gofind /tmp/sandbox -search contains
+//   gofind /tmp/sandbox -search contains -size
 
 func main() {
 	// Default root directory.
@@ -29,8 +30,9 @@ func main() {
 		os.Args = newArgs
 	}
 
-	// Define a flag for search string.
+	// Define flags for search string and size.
 	search := flag.String("search", "", "Search string to match in file names")
+	sizeFlag := flag.Bool("size", false, "Display file size if set")
 	flag.Parse()
 
 	// If a positional argument remains after flag.Parse(), use it as the root.
@@ -64,7 +66,7 @@ func main() {
     var results []string
 
 	// Walk through the directory tree.
-	walkDir(root, lowerSearch, &results)
+	walkDir(root, lowerSearch, *sizeFlag, &results)
 
 	// Print out the results.
 	for _, fileInfo := range results {
@@ -73,7 +75,7 @@ func main() {
 }
 
 // walkDir recursively processes the given directory.
-func walkDir(dir string, search string, results *[]string) {
+func walkDir(dir string, search string, sizeFlag bool, results *[]string) {
     // List the directory entries.
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -86,15 +88,28 @@ func walkDir(dir string, search string, results *[]string) {
 		fullPath := filepath.Join(dir, entry.Name())
 		if entry.IsDir() {
             // Recursively process subdirectories
-			walkDir(fullPath, search, results)
+			walkDir(fullPath, search, sizeFlag, results)
 		} else {
-            		// Check if the file name contains the search string.
-	    		// When search is empty, strings.Contains always returns true.
+            // Check if the file name contains the search string.
+	    	// When search is empty, strings.Contains always returns true.
 			// Convert file name to lower-case before comparing.			
 			if strings.Contains(strings.ToLower(entry.Name()), search) {
 
-                // Append formatted output to results slice
-                *results = append(*results, fmt.Sprintf("%s", fullPath))
+				if sizeFlag {
+				
+					// Get file details (e.g., size) using os.Stat (Slow !)
+					info, err := os.Stat(fullPath)
+					if err != nil {
+						log.Printf("failed to stat file %s: %v\n", fullPath, err)
+						continue
+					}
+
+                    // Append formatted output to results slice
+					*results = append(*results, fmt.Sprintf("%s\t%d", fullPath, info.Size()))
+				} else {
+					*results = append(*results, fullPath)
+				}
+
 			}
 		}
 	}
