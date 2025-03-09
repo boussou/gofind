@@ -23,6 +23,19 @@ func main() {
         root = flag.Arg(0)
     }
 
+	// Tilde Expansion
+	// Expand tilde if present (e.g., "~/D" -> "/home/username/D")
+	if strings.HasPrefix(root, "~") {
+		home, err := os.UserHomeDir()  // get the current user's home
+		if err != nil {
+			log.Fatalf("failed to get user home directory: %v", err)
+		}
+		if root == "~" {
+			root = home
+		} else if strings.HasPrefix(root, "~/") {
+			root = filepath.Join(home, root[2:])
+		}
+	}
 
 	// Display the search parameter only if it is not empty.
 	if *search != "" {
