@@ -7,12 +7,13 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 )
 
 // search file which name contains a string (case-insensitive)
 // sample calls:
-//   gofind -search contains -size /tmp/sandbox
-//   gofind /tmp/sandbox -search contains
+//   gofind -search contains -excludeFile tmp -size /tmp/sandbox
+//   gofind /tmp/sandbox -search contains -excludeFile tmp
 //   gofind /tmp/sandbox -search contains -size
 
 func main() {
@@ -30,9 +31,10 @@ func main() {
 		os.Args = newArgs
 	}
 
-	// Define flags for search string and size.
-	search := flag.String("search", "", "Search string to match in file names")
+	// Define flags for search string, size display, and exclusion.
+	search := flag.String("search", "", "Search string to match in file names (case-insensitive)")
 	sizeFlag := flag.Bool("size", false, "Display file size if set")
+	excludeFile := flag.String("excludeFile", "", "Exclude files/directories whose names contain this string or patterns from a file (case-insensitive)")
 	flag.Parse()
 
 	// If a positional argument remains after flag.Parse(), use it as the root.
@@ -41,7 +43,6 @@ func main() {
 	}
 
 	// Tilde Expansion: Expand "~" to the user's home directory.
-	// Expand tilde if present (e.g., "~/D" -> "/home/username/D")	
 	if strings.HasPrefix(root, "~") {
 		home, err := os.UserHomeDir() // get the current user's home directory
 		if err != nil {
@@ -54,63 +55,131 @@ func main() {
 		}
 	}
 
-	// Convert search string to lower-case for case-insensitive matching.
+	// Convert search and exclude strings to lower-case for case-insensitive matching.
 	lowerSearch := strings.ToLower(*search)
-
+	
 	// Display the search parameter only if it is not empty.
 	if lowerSearch != "" {
 		fmt.Printf("Search parameter: %s\n", lowerSearch)
 	}
 
-    // Collect results in a slice
-    var results []string
-
-	// Walk through the directory tree.
-	walkDir(root, lowerSearch, *sizeFlag, &results)
-
-	// Print out the results.
-	for _, fileInfo := range results {
-		fmt.Println(fileInfo)
-	}
-}
-
-// walkDir recursively processes the given directory.
-func walkDir(dir string, search string, sizeFlag bool, results *[]string) {
-    // List the directory entries.
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		log.Printf("failed to read directory %s: %v\n", dir, err)
-		return
+    // If exclude is provided it contains a list of the dirname prefixes to skip
+	if *excludeFile != "" {
+		fmt.Printf("Exclude parameter: %s\n", excludeFile)
 	}
 
-    // Iterate over each entry.
-	for _, entry := range entries {
-		fullPath := filepath.Join(dir, entry.Name())
-		if entry.IsDir() {
-            // Recursively process subdirectories
-			walkDir(fullPath, search, sizeFlag, results)
-		} else {
-            // Check if the file name contains the search string.
-	    	// When search is empty, strings.Contains always returns true.
-			// Convert file name to lower-case before comparing.			
-			if strings.Contains(strings.ToLower(entry.Name()), search) {
+    //...............//...............//...............
 
-				if sizeFlag {
+    // Load excluded directory name prefixes from the exclude file (if provided).
+    var excludedDirPrefixes []string
+
+    if *excludeFile != "" {
+        data, err := os.ReadFile(*excludeFile)
+        if err != nil {
+            log.Fatalf("failed to read exclude file %s: %v", excludeFile, err)
+        }
+        lines := strings.Split(string(data), "\n")
+        for _, line := range lines {            
+            dirName_prefix :=  strings.ToLower(strings.TrimSpace(line))            
+            if dirName_prefix != "" {
+                excludedDirPrefixes = append(excludedDirPrefixes, dirName_prefix)
+            }            
+        }
+    }
+    //...............//...............//...............
+
+    // Helper function to check if a directory name should be excluded.
+    shouldExclude := func(dirName string) bool {
+        lowerDirName := strings.ToLower(dirName)
+
+        for _, prefix := range excludedDirPrefixes {
+            if strings.HasPrefix(lowerDirName, prefix) {
+                return true
+            }
+        }
+        return false
+    }
+    //...............//...............//...............
+
+
+	// Channel to send matching file info.
+	fileCh := make(chan string)
+	var wg sync.WaitGroup
+
+	// walkDir recursively processes the given directory and its subdirectories concurrently.
+	// It now takes an additional parameter, exclude, that skips files whose names contain that substring.
+	var walkDir func(dir, search string, sizeFlag bool)
+	walkDir = func(dir, search string, sizeFlag bool) {
+		defer wg.Done()
+
+		// List the directory entries.
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			log.Printf("failed to read directory %s: %v\n", dir, err)
+			return
+		}
+
+		// Iterate over each entry.
+		for _, entry := range entries {
+			fullPath := filepath.Join(dir, entry.Name())
+			if entry.IsDir() {
+            
+                // Check if the directory should be excluded.
+                if shouldExclude(entry.Name()) {    
+                    continue
+                }
+
+				// Spawn a new goroutine for subdirectories.
+				wg.Add(1)
+				go walkDir(fullPath, search, sizeFlag)
+
+			} else {
+				// Convert the file name to lower-case before comparing.
+				lowerName := strings.ToLower(entry.Name())
+
+				// Check if file matches the search criteria.
+				if strings.Contains(lowerName, search) {
 				
-					// Get file details (e.g., size) using os.Stat (Slow !)
-					info, err := os.Stat(fullPath)
-					if err != nil {
-						log.Printf("failed to stat file %s: %v\n", fullPath, err)
-						continue
+					if sizeFlag {
+						// Check if the entry is a symlink: avoid calling os.Stat on symlinks
+						if entry.Type()&os.ModeSymlink != 0 {
+							// For symlinks, avoid calling os.Stat and simply note it's a symlink.
+							fileCh <- fmt.Sprintf("%s\tsymlink", fullPath)
+						} else {
+							// For non-symlink files, call os.Stat to get the file size.
+
+                            // Get file details (e.g., size) using os.Stat (Slow !)
+                            info, err := os.Stat(fullPath)
+							if err != nil {
+								log.Printf("failed to stat file %s: %v\n", fullPath, err)
+								continue
+							}
+                            // Send the formatted output to the channel.
+							fileCh <- fmt.Sprintf("%s\t%d", fullPath, info.Size())
+                        }
+
+					} else {
+						fileCh <- fullPath
 					}
 
-                    // Append formatted output to results slice
-					*results = append(*results, fmt.Sprintf("%s\t%d", fullPath, info.Size()))
-				} else {
-					*results = append(*results, fullPath)
 				}
-
 			}
 		}
+	}
+
+	// Start traversing from the root directory the directory tree    
+	wg.Add(1)
+	go walkDir(root, lowerSearch, *sizeFlag)
+
+	// Close the channel once all goroutines have finished
+    // (so after all directories have been processed)
+	go func() {
+		wg.Wait()
+		close(fileCh)
+	}()
+
+    // Print the results: matching files
+	for fileInfo := range fileCh {
+		fmt.Println(fileInfo)
 	}
 }
