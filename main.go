@@ -28,15 +28,15 @@ func computeXXHash(filePath string) (uint64, error) {
 	}
 	return h.Sum64(), nil
 }
-// gofind searches for files whose names contain a search string (case-insensitive).
+// gofind searches for files whose names contain a name string (case-insensitive).
 // Optionally, it displays file sizes when -size is set, and prints directory names if -printdir is set.
 // printing directory names allows to totally mimic the linux find command output.
 // if -xxhash is set, it displays the xxHash instead of size
 // Sample calls:
-//   gofind -search contains -size /tmp/sandbox
-//   gofind /tmp/sandbox -search contains  -printdir
-//   gofind /tmp/sandbox -search contains -size  -printdir
-//   gofind /tmp/sandbox -search contains -xxhash  -printdir
+//   gofind -name contains -size /tmp/sandbox
+//   gofind /tmp/sandbox -name contains  -printdir
+//   gofind /tmp/sandbox -name contains -size  -printdir
+//   gofind /tmp/sandbox -name contains -xxhash  -printdir
 func main() {
 	// Default root directory.
 	root := "."
@@ -52,11 +52,11 @@ func main() {
 		os.Args = newArgs
 	}
 
-	// Define flags for search string, size display, and printing directory names.
-	search := flag.String("search", "", "Search string to match in file names (case-insensitive)")
+	// Define flags for name string, size display, and printing directory names.
+	name := flag.String("name", "", "Search string to match in file names (case-insensitive)")
 	sizeFlag := flag.Bool("size", false, "Display file size if set")
 	xxhashFlag := flag.Bool("xxhash", false, "Display file xxHash if set (replaces size)")
-	printDirFlag := flag.Bool("printdir", false, "Also print directory names that match the search string")
+	printDirFlag := flag.Bool("printdir", false, "Also print directory names that match the name string")
 	flag.Parse()
 
 	// If a positional argument remains after flag.Parse(), use it as the root.
@@ -78,7 +78,7 @@ func main() {
 	}
 
 	// Convert search string to lower-case for case-insensitive matching.
-	lowerSearch := strings.ToLower(*search)
+	lowerSearch := strings.ToLower(*name)
 
 	// Display the search parameter only if it is not empty.
 	if lowerSearch != "" {
