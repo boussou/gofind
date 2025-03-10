@@ -24,6 +24,10 @@ parameters:
 
 ## Execute
 
+0.  To add package xxhash:
+        go get github.com/cespare/xxhash/v2
+
+
 1. **Using `go run`:**  
    ```bash
    go run main.go -search=pattern /path/to/directory

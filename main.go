@@ -3,22 +3,40 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+
+	"github.com/cespare/xxhash/v2"
 )
 
 const maxConcurrent = 1000
 
+// computeXXHash opens the given file and computes its xxHash64 value.
+func computeXXHash(filePath string) (uint64, error) {
+	f, err := os.Open(filePath)
+	if err != nil {
+		return 0, err
+	}
+	defer f.Close()
+	h := xxhash.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return 0, err
+	}
+	return h.Sum64(), nil
+}
 // gofind searches for files whose names contain a search string (case-insensitive).
 // Optionally, it displays file sizes when -size is set, and prints directory names if -printdir is set.
 // printing directory names allows to totally mimic the linux find command output.
+// if -xxhash is set, it displays the xxHash instead of size
 // Sample calls:
 //   gofind -search contains -size /tmp/sandbox
 //   gofind /tmp/sandbox -search contains  -printdir
 //   gofind /tmp/sandbox -search contains -size  -printdir
+//   gofind /tmp/sandbox -search contains -xxhash  -printdir
 func main() {
 	// Default root directory.
 	root := "."
@@ -37,6 +55,7 @@ func main() {
 	// Define flags for search string, size display, and printing directory names.
 	search := flag.String("search", "", "Search string to match in file names (case-insensitive)")
 	sizeFlag := flag.Bool("size", false, "Display file size if set")
+	xxhashFlag := flag.Bool("xxhash", false, "Display file xxHash if set (replaces size)")
 	printDirFlag := flag.Bool("printdir", false, "Also print directory names that match the search string")
 	flag.Parse()
 
@@ -80,10 +99,11 @@ func main() {
 	// It uses the semaphore (sem) to limit concurrent calls.
 	var walkDir func(dir string)
 	walkDir = func(dir string) {
-		// Acquire a slot in the semaphore.
-		sem <- struct{}{}
-		// Release the slot when done.
-		defer func() { <-sem }()
+		
+		sem <- struct{}{} // Acquire a slot in the semaphore.
+	
+		defer func() { <-sem }() 	// Release the slot when done.
+		
 		defer wg.Done()
 
 		// List the directory entries.
@@ -120,26 +140,37 @@ func main() {
 		                // Check if the file name contains the search string.
 		                // When search is empty, strings.Contains always returns true.
 				if strings.Contains(lowerName, lowerSearch) {
-					if *sizeFlag {
-						// Check if the entry is a symlink: avoid calling os.Stat on symlinks.
-						if entry.Type()&os.ModeSymlink != 0 {
-							fileCh <- fmt.Sprintf("%s\tSYMLINK", fullPath)
-						} else {
-							// For regular files, call os.Stat to get the file size.
-
-		                            		// Get file details (e.g., size) using os.Stat (Slow !)
-							info, err := os.Stat(fullPath)
+					// Check if the entry is a symlink: avoid calling os.Stat on symlinks.
+					if entry.Type()&os.ModeSymlink != 0 {
+						fileCh <- fmt.Sprintf("%s\tSYMLINK", fullPath)
+					} else {
+						if *xxhashFlag {
+							// Calculate and display the file's xxHash.
+							hash, err := computeXXHash(fullPath)
 							if err != nil {
-								log.Printf("failed to stat file %s: %v\n", fullPath, err)
+								log.Printf("failed to compute xxHash for file %s: %v\n", fullPath, err)
 								continue
 							}
+							fileCh <- fmt.Sprintf("%s\txxHash:%d", fullPath, hash)
+						} else if *sizeFlag {
 
-                            // Send the formatted output to the channel.
-							fileCh <- fmt.Sprintf("%s\t%d", fullPath, info.Size())
+								// For regular files, call os.Stat to get the file size.
+
+								// Get file details (e.g., size) using os.Stat (Slow !)
+								info, err := os.Stat(fullPath)
+								if err != nil {
+									log.Printf("failed to stat file %s: %v\n", fullPath, err)
+									continue
+								}
+
+				// Send the formatted output to the channel.
+								fileCh <- fmt.Sprintf("%s\t%d", fullPath, info.Size())
+
+						} else {
+							fileCh <- fullPath
 						}
-					} else {
-						fileCh <- fullPath
 					}
+
 				}
 			}
 		}
@@ -150,13 +181,13 @@ func main() {
 	go walkDir(root)
 
 	// Close the channel once all goroutines have finished.
-    // (so after all directories have been processed)
+        // (so after all directories have been processed)
 	go func() {
 		wg.Wait()
 		close(fileCh)
 	}()
 
-    // Print the results: matching files
+        // Print the results: matching files
 	for fileInfo := range fileCh {
 		fmt.Println(fileInfo)
 	}
