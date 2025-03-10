@@ -9,14 +9,14 @@ It will output each matching file with its full path (and size in bytes if reque
 Sample call:
 
 ```
-gofind  -search propa  /tmp/sandbox
-gofind -search contains -size /tmp/sandbox
-gofind /tmp/sandbox -search contains
-gofind /tmp/sandbox -search contains -size
+gofind -name propa  /tmp/sandbox
+gofind -name contains -size /tmp/sandbox
+gofind /tmp/sandbox -name contains
+gofind /tmp/sandbox -name contains -size -hash
 ```
 
 parameters:
-- search Search string to match in file names (case-insensitive)
+- name Search string to match in file names (case-insensitive)
 - size  displays the file size right after the filename
 - printdir:  Optionally prints directory names if -printdir is set
              It allow to totally mimic the output of the linux find command.
@@ -30,7 +30,7 @@ parameters:
 
 1. **Using `go run`:**  
    ```bash
-   go run main.go -search=pattern /path/to/directory
+   go run main.go -name=pattern /path/to/directory
    ```
    This command runs the program directly. Replace `/path/to/directory` with the directory you want to search and `pattern` with the string to match in file names.
 
@@ -47,9 +47,9 @@ parameters:
 
    Then execute the binary:
    ```bash
-   ./gofind /path/to/directory -search=pattern
+   ./gofind /path/to/directory -name=pattern
    ```
-  Here specify the root directory to begin the search from and the `-search` pattern to filter file names, 
+  Here specify the root directory to begin the search from and the `-name` pattern to filter file names, 
 
 
 

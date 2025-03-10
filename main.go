@@ -31,12 +31,12 @@ func computeXXHash(filePath string) (uint64, error) {
 // gofind searches for files whose names contain a name string (case-insensitive).
 // Optionally, it displays file sizes when -size is set, and prints directory names if -printdir is set.
 // printing directory names allows to totally mimic the linux find command output.
-// if -xxhash is set, it displays the xxHash instead of size
+// if -hash is set, it displays the xxHash instead of size
 // Sample calls:
 //   gofind -name contains -size /tmp/sandbox
 //   gofind /tmp/sandbox -name contains  -printdir
 //   gofind /tmp/sandbox -name contains -size  -printdir
-//   gofind /tmp/sandbox -name contains -xxhash  -printdir
+//   gofind /tmp/sandbox -name contains -hash  -printdir
 func main() {
 	// Default root directory.
 	root := "."
@@ -55,7 +55,7 @@ func main() {
 	// Define flags for name string, size display, and printing directory names.
 	name := flag.String("name", "", "Search string to match in file names (case-insensitive)")
 	sizeFlag := flag.Bool("size", false, "Display file size if set")
-	xxhashFlag := flag.Bool("xxhash", false, "Display file xxHash if set (replaces size)")
+	xxhashFlag := flag.Bool("hash", false, "Display file xxHash if set (replaces size)")
 	printDirFlag := flag.Bool("printdir", false, "Also print directory names that match the name string")
 	flag.Parse()
 
